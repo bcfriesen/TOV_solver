@@ -1,0 +1,56 @@
+This program calculates the pressure P and total mass M as a function of
+radius r in a spherically symmetric, static mass, in the context of general
+relativity. The ODE for the pressure is known as the Tolman-Oppenheimer-Volkoff
+(TOV) equation, whereas the mass ODE comes simply from mass conservation. Note
+that M(r) is defined as the TOTAL mass included out to radius r, and thus must
+be a monotonically increasing function in r.
+
+The TOV equation + mass conservation lead to 2 ODEs (one for M(r) and the
+other for P(r)), but in these equations we have a third variable, the matter
+density \rho(r). Thus we close (and therefore are able to solve) the system
+by providing some function \rho. In principle the equations are simplest to
+solve if we know \rho(r), but I can't think of a single case where we would
+know \rho(r) in a star ab initio. So instead we can also provide \rho(P), which
+is known in thermodynamics as an equation of state (EOS). This program uses
+the latter. Specifically it uses a parameterized but not-completely-worthless
+EOS called a "polytrope" which is a function which satisfies the Lane-Emden
+differential equation and has the form
+
+                           P(\rho) = K * (\rho)^\Gamma
+
+where K and \Gamma are constants. For electron-degenerate matter (in white
+dwarfs, e.g.) one can use \Gamma = 5/3. For neutron-degenerate matter (in
+neutron stars), one can use \Gamma = 2. In this solver I have set K = 1 because
+a.) it makes the calculation simpler and the numbers more reasonable, and b.) I
+can put the units back at the end. I have also set G = c = 1 for the same
+reason.
+
+Also, because I am not yet a clever programmer, I have written the ODEs in the
+solver explicitly using the polytropic form, rather than, e.g., leaving \rho
+in the equations and making it some call-able function that the user can tweak
+to insert whatever EOS he wants. I'm sure it's possible and not very hard to
+do, but I haven't figured it out yet. So \Gamma is knob, but \rho(P) as a whole
+is not.
+
+Among other things, this program can tell you how massive is a relativistic star
+in hydrostatic equilibrium. To find this, just pick some final radius for the
+integration and watch P(r) drop. The surface of the star R is at the radius
+where P(r = R) = 0. Of course the integrator has no idea that P(r) can't be
+negative, but ODEs certainly do, and will result in lots of NaNs once the
+integrator reaches the surface. So pick a large enough 'final' radius such
+that P(r) at least reaches zero, and ignore everything past that point where
+it goes negative/NaN. I find (in these weird unitless equations) that R ~ 1.5.
+
+Remember also that you need to specify P(r = 0) as an initial condition. By
+construction M(r = 0) = 0 so that part's done. What's cool to do is fix \Gamma
+and then vary P(r = 0) and watch the total mass vary with it. You should find
+that there exists single P(r = 0) for which M(r = R) is maximized. For
+\Gamma ~ 5/3 (a WD) that value should be about ~1.4 M_solar, the famous
+Chandrasekhar mass. For \Gamma ~ 2, it's something like ~0.7 M_solar, the
+slightly less famous Tolman-Oppenheimer-Volkoff limit.
+
+
+REFERENCES
+----------
+http://en.wikipedia.org/wiki/Tolman%E2%80%93Oppenheimer%E2%80%93Volkoff_equation
+http://mathworld.wolfram.com/Lane-EmdenDifferentialEquation.html
