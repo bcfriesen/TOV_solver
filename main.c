@@ -8,13 +8,14 @@
 
 int func (double t, const double y[], double f[], void *params)
 {
-  if ((gsl_isnan(f[0]) || gsl_isnan(f[1])) || y[1] < 0.0) {return GSL_EBADFUNC;}
+  if (y[1] < 0.0) {return GSL_EBADFUNC;} // can't have negative pressure
     
   double Gamma = *(double *)params;
 //  printf("r = %12f; M[0] = %12f; P[1] = %12f\n", t, y[0], y[1]);
   f[0] = 4.0*M_PI*pow(t, 2.0)*pow(y[1], 1.0/Gamma);
   f[1] = -(pow(y[1], 1.0/Gamma)*y[0]/pow(t, 2.0))*(1.0 + pow(y[1], (Gamma - 1.0)/Gamma))*(1.0 + (4.0*M_PI*y[1]*pow(t, 3.0))/y[0])*
          pow(1.0 - 2.0*y[0]/t, -1.0);
+  if ((gsl_isnan(f[0]) || gsl_isnan(f[1]))) {return GSL_EBADFUNC;}
 
   return GSL_SUCCESS;
 }
@@ -31,33 +32,6 @@ int main (void)
   int i;
   const int MAX = 1000;
   int status;
-
-/*  gsl_odeiv2_system sys = {func, fake_jac, 2, &Gamma};
-
-  gsl_odeiv2_driver *d = gsl_odeiv2_driver_alloc_y_new (&sys, gsl_odeiv2_step_rk8pd, 1.0e-6, 1.0e-6, 0.0);
-
-  for (i = 0; i < MAX; i++)
-  {
-    t = 1.0e-5;
-    t1 = 3.0;
-    y[0] = 1.0e-6; // mass always starts at 0
-    y[1] = 1.0e-2 + (double)i;
-    printf("y[0] = %12f; y[1] = %12f\n", y[0], y[1]);
-    int status = gsl_odeiv2_driver_apply(d, &t, t1, y);
-  }
-
-  t = 1.0e-5;
-  t1 = 3.0;
-  y[0] = 1.0e-6;
-  y[1] = 1.0;
-  status = gsl_odeiv2_driver_apply(d, &t, t1, y);
-
-  gsl_odeiv2_driver_free (d);
-
-  t = 1.0e-5;
-  t1 = 3.0;
-  y[0] = 1.0e-6;
-  y[1] = 1.0; */
 
   printf("%12s %12s %12s\n", "RADIUS", "M(r = R)", "P(r = 0)");
   for (i = 0; i < MAX; i++)
