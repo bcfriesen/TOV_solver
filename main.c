@@ -11,9 +11,26 @@ struct param // parameter list to be passed to ODEs
   double Gamma, pinit;
 };
 
+// EOS function so we don't have to hard-code it into the structure of the
+// ODEs. For now, since the 2 ODEs are for P and M, we'll assume the EOS is
+// in the form rho = rho(P), which, I think, is usually the inverse of the
+// structure of most real EOS routines. I'm doing it this way just so I
+// don't have to change one of the ODE variables from P to rho. In the long
+// run that would be the better way to do this, just so that it would play
+// nicer with external EOSs.
+double eos_rho(double pres, double Gamma);
+
+
+double eos_rho(double pres, double Gamma)
+{
+  return (pow(pres, 1.0/Gamma)); // polytrope
+}
+
 int func (double t, const double y[], double f[], void *params)
 {
   struct param myparams = *(struct param *)params;
+  double (*rho)(double, double); // EOS pointer
+  rho = &eos_rho;
 
   if (y[1] < 0.0) // can't have negative pressure
   {
@@ -23,6 +40,8 @@ int func (double t, const double y[], double f[], void *params)
 
   // ODEs written explicit in terms of polytropic EOS. this should change
   // because it's not flexible.
+
+
   f[0] = 4.0*M_PI*pow(t, 2.0)*pow(y[1], 1.0/myparams.Gamma);
   f[1] = -(pow(y[1], 1.0/myparams.Gamma)*y[0]/pow(t, 2.0))*(1.0 +
            pow(y[1], (myparams.Gamma - 1.0)/myparams.Gamma))*(1.0 +
