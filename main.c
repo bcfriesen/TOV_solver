@@ -8,6 +8,8 @@
 
 struct param // parameter list to be passed to ODEs
 {
+  // pinit: central pressure
+  // Gamma: polytropic index
   double Gamma, pinit;
 };
 
@@ -23,7 +25,7 @@ double eos_rho(double pres, double Gamma)
   return (pow(pres, 1.0/Gamma)); // polytrope
 }
 
-int func (double t, const double y[], double f[], void *params)
+int func (double r, const double y[], double f[], void *params)
 {
   struct param myparams = *(struct param *)params;
   double (*rho)(double, double); // EOS pointer
@@ -31,26 +33,23 @@ int func (double t, const double y[], double f[], void *params)
 
   if (y[1] < 0.0) // can't have negative pressure
   {
-    printf("%12f %12f %12f\n", t, y[0], myparams.pinit);
+    printf("%12f %12f %12f\n", r, y[0], myparams.pinit);
     return GSL_EBADFUNC; // this flag tells GSL integrator to quit
   } 
 
-  // ODEs written explicit in terms of polytropic EOS. this should change
-  // because it's not flexible.
-
   // mass conservation equation
-  f[0] = 4.0*M_PI*pow(t, 2.0)*rho(y[1], myparams.Gamma);
+  f[0] = 4.0*M_PI*pow(r, 2.0)*rho(y[1], myparams.Gamma);
 
   // TOV equation
-  f[1] = -(1.0/pow(t, 2.0)) * (rho(y[1], myparams.Gamma) + y[1]) *
-         (y[0] + 4.0*M_PI*pow(t, 3.0)*y[1]) / (1.0 - (2.0*y[0]/t));
+  f[1] = -(1.0/pow(r, 2.0)) * (rho(y[1], myparams.Gamma) + y[1]) *
+         (y[0] + 4.0*M_PI*pow(r, 3.0)*y[1]) / (1.0 - (2.0*y[0]/r));
 
 // ODEs tend to return NaNs at the same radius where P < 0
   if ((gsl_isnan(f[0]) || gsl_isnan(f[1]))) 
   {
     /* print values at the radius where ODEs diverge. this is almost always
        at the surface */
-    printf("%12f %12f %12f\n", t, y[0], myparams.pinit);
+    printf("%12f %12f %12f\n", r, y[0], myparams.pinit);
     return GSL_EBADFUNC;
   }
 
@@ -60,41 +59,48 @@ int func (double t, const double y[], double f[], void *params)
 
 int main (void)
 {
+  int i, status;
   struct param params;
-  params.Gamma = 5.0/3.0;
-  double t, t1;
-  double y[2];
-  const double tiny = 1.0e-5;
-  const double pmin = tiny, pmax = 0.2;
-  int i;
+  double r, r1, y[2];
+  const double tiny = 1.0e-5, pmin = tiny, pmax = 0.2;
   const int MAX = 1000;
-  int status;
+
+  params.Gamma = 5.0/3.0; // electron-degenerate EOS
 
   for (i = 0; i < MAX; i++)
   {
-    t = 1.0e-5;
-    t1 = 3.0;
-    y[0] = 1.0e-6; // central mass always starts at 0
+    r = 1.0e-5; // the integrator will go nuts if we start right at r=0
+    r1 = 3.0; // some final 'radius' (much larger than actual radius)
+    // central mass always starts at 0 (or very close, for numerical reasons)
+    y[0] = 1.0e-6;
     y[1] = pmin + (double)i*((pmax - pmin)/(double)MAX);
     params.pinit = y[1];
-    status = make_grid(params, &t, t1, y);
+    /* This function is useful if you want to plot, e.g., central
+     * pressure vs. total mass. You can also hang onto the run of pressure
+     * with radius, which can be interesting when compared to the Newtonian
+     * case. */
+    status = make_grid(params, &r, r1, y);
   }
   
   return 0;
 }
 
-int make_grid (struct param params, double *t, double t1, double y[])
+int make_grid (struct param params, double *r, double r1, double y[])
 {
   int status;
   int *fake_jac;
-  fake_jac = 0; /* the integrator RK8PD doesn't need the jacobian so make this
-                   a null pointer. linker will complain that the pointer type
-		   is incompatable but it won't be used anyway. */
+ /* The integrator RK8PD (Runge-Kutta Prince-Dormand) doesn't need the jacobian
+  * (some more sophisticated integrators do) so make this a null pointer.
+  * The linker will complain that the pointer type is incompatable since it
+  * doesn't point to a function with a bunch of arguments, but the pointer
+  * won't be used anyway so it doesn't matter. */
+  fake_jac = 0;
+		   
   gsl_odeiv2_system sys = {func, fake_jac, 2, &params};
   gsl_odeiv2_driver *d = gsl_odeiv2_driver_alloc_y_new
                          (&sys, gsl_odeiv2_step_rk8pd, 1.0e-6, 1.0e-6, 0.0);
 
-  status = gsl_odeiv2_driver_apply(d, t, t1, y);
+  status = gsl_odeiv2_driver_apply(d, r, r1, y);
 
   gsl_odeiv2_driver_free (d);
   return 0;
