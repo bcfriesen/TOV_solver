@@ -11,16 +11,13 @@ struct param // parameter list to be passed to ODEs
   double Gamma, pinit;
 };
 
-// EOS function so we don't have to hard-code it into the structure of the
-// ODEs. For now, since the 2 ODEs are for P and M, we'll assume the EOS is
-// in the form rho = rho(P), which, I think, is usually the inverse of the
-// structure of most real EOS routines. I'm doing it this way just so I
-// don't have to change one of the ODE variables from P to rho. In the long
-// run that would be the better way to do this, just so that it would play
-// nicer with external EOSs.
-double eos_rho(double pres, double Gamma);
-
-
+/* EOS function so we don't have to hard-code it into the structure of the
+   ODEs. For now, since the 2 ODEs are for P and M, we'll assume the EOS is
+   in the form rho = rho(P), which, I think, is usually the inverse of the
+   structure of most real EOS routines. I'm doing it this way just so I
+   don't have to change one of the ODE variables from P to rho. In the long
+   run that would be the better way to do this, just so that it would play
+   nicer with external EOSs. */
 double eos_rho(double pres, double Gamma)
 {
   return (pow(pres, 1.0/Gamma)); // polytrope
@@ -41,16 +38,18 @@ int func (double t, const double y[], double f[], void *params)
   // ODEs written explicit in terms of polytropic EOS. this should change
   // because it's not flexible.
 
+  // mass conservation equation
+  f[0] = 4.0*M_PI*pow(t, 2.0)*rho(y[1], myparams.Gamma);
 
-  f[0] = 4.0*M_PI*pow(t, 2.0)*pow(y[1], 1.0/myparams.Gamma);
-  f[1] = -(pow(y[1], 1.0/myparams.Gamma)*y[0]/pow(t, 2.0))*(1.0 +
-           pow(y[1], (myparams.Gamma - 1.0)/myparams.Gamma))*(1.0 +
-           (4.0*M_PI*y[1]*pow(t, 3.0))/y[0])*
-           pow(1.0 - 2.0*y[0]/t, -1.0);
+  // TOV equation
+  f[1] = -(1.0/pow(t, 2.0)) * (rho(y[1], myparams.Gamma) + y[1]) *
+         (y[0] + 4.0*M_PI*pow(t, 3.0)*y[1]) / (1.0 - (2.0*y[0]/t));
 
 // ODEs tend to return NaNs at the same radius where P < 0
   if ((gsl_isnan(f[0]) || gsl_isnan(f[1]))) 
   {
+    /* print values at the radius where ODEs diverge. this is almost always
+       at the surface */
     printf("%12f %12f %12f\n", t, y[0], myparams.pinit);
     return GSL_EBADFUNC;
   }
@@ -87,7 +86,10 @@ int main (void)
 int make_grid (struct param params, double *t, double t1, double y[])
 {
   int status;
-  int *fake_jac = NULL; // the integrator RK8PD doesn't need the jacobian
+  int *fake_jac;
+  fake_jac = 0; /* the integrator RK8PD doesn't need the jacobian so make this
+                   a null pointer. linker will complain that the pointer type
+		   is incompatable but it won't be used anyway. */
   gsl_odeiv2_system sys = {func, fake_jac, 2, &params};
   gsl_odeiv2_driver *d = gsl_odeiv2_driver_alloc_y_new
                          (&sys, gsl_odeiv2_step_rk8pd, 1.0e-6, 1.0e-6, 0.0);
