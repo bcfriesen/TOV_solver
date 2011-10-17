@@ -10,7 +10,7 @@ other for P(r)), but in these equations we have a third variable, the matter
 density \rho(r). Thus we close (and therefore are able to solve) the system
 by providing some function \rho. In principle the equations are simplest to
 solve if we know \rho(r), but I can't think of a single case where we would
-know \rho(r) in a star ab initio. So instead we can also provide \rho(P), which
+know \rho(r) in a star ab initio. So instead we can provide \rho(P), which
 is known in thermodynamics as an equation of state (EOS). This program uses
 the latter. Specifically it uses a parameterized but not-completely-worthless
 EOS called a "polytrope" which is a function which satisfies the Lane-Emden
@@ -25,21 +25,24 @@ a.) it makes the calculation simpler and the numbers more reasonable, and b.) I
 can put the units back at the end. I have also set G = c = 1 for the same
 reason.
 
-Also, because I am not yet a clever programmer, I have written the ODEs in the
-solver explicitly using the polytropic form, rather than, e.g., leaving \rho
-in the equations and making it some call-able function that the user can tweak
-to insert whatever EOS he wants. I'm sure it's possible and not very hard to
-do, but I haven't figured it out yet. So \Gamma is knob, but \rho(P) as a whole
-is not.
+Given that the ODEs contain derivatives of P and M, we must supply the EOS in
+the form of \rho = \rho(P). Typically an EOS is written the other way around:
+P = P(\rho). However, because the ODEs are written such that P is being
+integrated, not \rho, we must close the system using this unusual form. To
+rewrite the ODEs such that \rho is being integrated, not P, would amount only
+to a small bit of work; I just haven't done it yet. This case would be more
+appropriate (read: standard) since most EOSs receive \rho as an argument and
+return P, so if I wanted this program to play nicely with them I would have to
+rewrite it as described above.
 
 Among other things, this program can tell you how massive is a relativistic star
 in hydrostatic equilibrium. To find this, just pick some final radius for the
 integration and watch P(r) drop. The surface of the star R is at the radius
 where P(r = R) = 0. Of course the integrator has no idea that P(r) can't be
-negative, but ODEs certainly do, and will result in lots of NaNs once the
+negative, but the ODEs certainly do, and will result in lots of NaNs once the
 integrator reaches the surface. So pick a large enough 'final' radius such
 that P(r) at least reaches zero, and ignore everything past that point where
-it goes negative/NaN. I find (in these weird unitless equations) that R ~ 1.5.
+it goes negative/NaN. I find (in this weird unitless form) that R ~ 1.5.
 
 Remember also that you need to specify P(r = 0) as an initial condition. By
 construction M(r = 0) = 0 so that part's done. What's cool to do is fix \Gamma
