@@ -1,3 +1,33 @@
+/*
+
+Copyright 2011 Brian Friesen. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of
+   conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list
+   of conditions and the following disclaimer in the documentation and/or other materials
+   provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY BRIAN FRIESEN ''AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The views and conclusions contained in the software and documentation are those of the
+authors and should not be interpreted as representing official policies, either expressed
+or implied, of Brian Friesen.
+
+*/
+
 #include <stdio.h>
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_matrix.h>
@@ -66,11 +96,13 @@ int main (void)
   const int MAX = 1000;
 
   params.Gamma = 5.0/3.0; // electron-degenerate EOS
+//  params.Gamma = 3.0; // neutron-degenerate EOS
 
+  printf("%12s %12s %12s\n", "R", "M(r=R)", "P(r=0)");
+  r = 1.0e-5; // the integrator will go nuts if we start right at r=0
+  r1 = 3.0; // some final 'radius' (much larger than actual radius)
   for (i = 0; i < MAX; i++)
   {
-    r = 1.0e-5; // the integrator will go nuts if we start right at r=0
-    r1 = 3.0; // some final 'radius' (much larger than actual radius)
     // central mass always starts at 0 (or very close, for numerical reasons)
     y[0] = 1.0e-6;
     y[1] = pmin + (double)i*((pmax - pmin)/(double)MAX);
@@ -79,13 +111,13 @@ int main (void)
      * pressure vs. total mass. You can also hang onto the run of pressure
      * with radius, which can be interesting when compared to the Newtonian
      * case. */
-    status = make_grid(params, &r, r1, y);
+    status = make_grid(params, r, r1, y);
   }
   
   return 0;
 }
 
-int make_grid (struct param params, double *r, double r1, double y[])
+int make_grid (struct param params, double r, double r1, double y[])
 {
   int status;
   int *fake_jac;
@@ -98,9 +130,9 @@ int make_grid (struct param params, double *r, double r1, double y[])
 		   
   gsl_odeiv2_system sys = {func, fake_jac, 2, &params};
   gsl_odeiv2_driver *d = gsl_odeiv2_driver_alloc_y_new
-                         (&sys, gsl_odeiv2_step_rk8pd, 1.0e-6, 1.0e-6, 0.0);
+                         (&sys, gsl_odeiv2_step_rk4, 1.0e-6, 1.0e-6, 0.0);
 
-  status = gsl_odeiv2_driver_apply(d, r, r1, y);
+  status = gsl_odeiv2_driver_apply(d, &r, r1, y);
 
   gsl_odeiv2_driver_free (d);
   return 0;
