@@ -22,6 +22,7 @@ struct param // parameter list to be passed to ODEs
   double temp;
 };
 
+int make_grid (struct param params, double r, double r1, double y[]);
 
 /* EOS function so we don't have to hard-code it into the structure of
    the ODEs. For now, since the 2 ODEs are for P and M, we'll assume
@@ -90,7 +91,7 @@ int main (void)
 
   fp = fopen("bck", "r");
   // read in # of data points
-  fscanf(fp, "%i", neospts);
+  fscanf(fp, "%i", &neospts);
 
   printf("# of EOS data points: %i", neospts);
   eos_pres = (double *) malloc(neospts*sizeof(double));
@@ -99,7 +100,7 @@ int main (void)
   // read in density and pressure data
   for (i = 0; i <= neospts-1; i++)
     {
-      fscanf(fp, "%f %f", eos_dens[i], eos_pres[i]);
+      fscanf(fp, "%e %e", eos_dens[i], eos_pres[i]);
     }
 
   fclose(fp);

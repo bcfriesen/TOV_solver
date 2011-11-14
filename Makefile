@@ -1,7 +1,7 @@
 OBJS = main.o
 
 CC = gfortran
-CCFLAGS = -g -O0
+CCFLAGS = -g -O0 -Wall
 CXX = g++
 CXXFLAGS = -g -O0
 LD = g++
