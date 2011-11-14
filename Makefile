@@ -1,10 +1,10 @@
 OBJS = main.o
 
-CC = gfortran
+CC = gcc
 CCFLAGS = -g -O0 -Wall
 CXX = g++
 CXXFLAGS = -g -O0
-LD = g++
+LD = gcc
 LDFLAGS = -g -O0
 LIBS = -L/home/friesen/lib -lgsl -lgslcblas -lm
 INCLUDE = -I/home/friesen/include
