@@ -61,9 +61,12 @@ int func (double r, const double y[], double f[], void *params)
 
   // TOV equation
   f[1] = -(GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT / pow(r, 2.0))
-    * (p_or_d(y[1], myparams, 0) + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
-    + (y[0] + 4 * M_PI * pow(r, 3.0) * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
-    / (1.0 - (2.0 * GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT * y[0] / (pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0) * r)));
+    * (p_or_d(y[1], myparams, 0)
+    + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
+    + (y[0] + 4 * M_PI * pow(r, 3.0)
+    * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
+    / (1.0 - (2.0 * GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT * y[0]
+    / (pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0) * r)));
 
   // ODEs tend to return NaNs at the same radius where P < 0
   if ((gsl_isnan(f[0]) || gsl_isnan(f[1]))) 
@@ -85,31 +88,40 @@ int main (void)
   double r, r1, y[2];
   const double tiny = 1.0e-5, pmin = tiny, pmax = 0.2;
   const int MAX = 1000;
-  int neospts;
+  // pressure/density arrays from tabulated EOS data
   double *eos_pres = NULL, *eos_dens = NULL;
+  double *tmp1 = NULL, *tmp2 = NULL;
+  int n_eos_pts;
   FILE *fp;
 
-  fp = fopen("bck", "r");
-  // read in # of data points
-  fscanf(fp, "%i", &neospts);
+  fp = fopen("bck.eos", "r");
 
-  printf("# of EOS data points: %i", neospts);
-  eos_pres = (double *) malloc(neospts*sizeof(double));
-  eos_dens = (double *) malloc(neospts*sizeof(double));
-  
+  if (fp == NULL) {
+    fprintf(stderr, "Can't open file!\n");
+    exit(1);
+  }
+
+  // read in # of EOS data points
+  fscanf(fp, "%i", &n_eos_pts);
+
+  printf("# of EOS data points: %i\n", n_eos_pts);
+  eos_dens = (double *) malloc (n_eos_pts*sizeof(double));
+  eos_pres = (double *) malloc (n_eos_pts*sizeof(double));
+  tmp1 = (double *) malloc (n_eos_pts*sizeof(double));
+  tmp2 = (double *) malloc (n_eos_pts*sizeof(double));
+  for (i = 0; i < n_eos_pts; i++) {
+    fscanf(fp, "%e %e %e %e",
+	   &eos_dens[i], &eos_pres[i], &tmp1, &tmp2);
+  }
   // read in density and pressure data
-  for (i = 0; i <= neospts-1; i++)
-    {
-      fscanf(fp, "%e %e", eos_dens[i], eos_pres[i]);
-    }
 
   fclose(fp);
 
   // set up interpolators for EOS
-  params.acc = gsl_interp_accel_alloc ();
-  params.spline = gsl_spline_alloc (gsl_interp_cspline, neospts);
+  //  params.acc = gsl_interp_accel_alloc ();
+  //  params.spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
 
-  printf("%12s %12s %12s\n", "R", "M(r=R)", "P(r=0)");
+  printf ("%12s %12s %12s\n", "R", "M(r=R)", "P(r=0)");
 
   r = 1.0e-5; // the integrator will go nuts if we start right at r=0
   r1 = 3.0; // some final 'radius' (much larger than actual radius)
@@ -137,13 +149,17 @@ int main (void)
   params.pinit = y[1];
   status = make_grid(params, r, r1, y);
 
-  gsl_spline_free (params.spline);
-  gsl_interp_accel_free (params.acc);
-  free(eos_pres);
-  free(eos_dens);
-  
-  eos_pres = NULL;
+  //  gsl_spline_free (params.spline);
+  //  gsl_interp_accel_free (params.acc);
+  free (eos_pres);
+  free (eos_dens);
+  free (tmp1);
+  free (tmp2);
+
   eos_dens = NULL;
+  eos_pres = NULL;
+  tmp1 = NULL;
+  tmp2 = NULL;  
   return 0;
 }
 
