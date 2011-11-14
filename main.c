@@ -8,6 +8,8 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_spline.h>
 
+double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
+
 struct param // parameter list to be passed to ODEs
 {
   // pinit: central pressure
@@ -22,18 +24,22 @@ struct param // parameter list to be passed to ODEs
   double temp;
 };
 
+
 int make_grid (struct param params, double r, double r1, double y[]);
 
-/* EOS function so we don't have to hard-code it into the structure of
-   the ODEs. For now, since the 2 ODEs are for P and M, we'll assume
-   the EOS is in the form rho = rho(P), which, I think, is usually the
-   inverse of the structure of most real EOS routines. I'm doing it
-   this way just so I don't have to change one of the ODE variables
-   from P to rho. In the long run that would be the better way to do
-   this, just so that it would play nicer with external EOSs. */
-double eos_p_or_d(double p_or_d, struct param myparams, int d_to_p)
+
+// EOS. input: rho, T. output: P
+double eos_pres(double rho, struct param *params)
 {
-  return (pow(p_or_d, 1.0/myparams.Gamma)); // polytrope
+  return (gsl_spline_eval (params->spline, rho, params->acc));
+  //  return (pow(rho, 1.0/params.Gamma)); // polytrope
+}
+
+
+// "reverse" EOS. input: P, T. output: rho
+double eos_rho(double pres, struct param *params) {
+  // fill in the blanks...
+ return (0.0);
 }
 
 
@@ -41,8 +47,10 @@ double eos_p_or_d(double p_or_d, struct param myparams, int d_to_p)
 int func (double r, const double y[], double f[], void *params)
 {
   struct param myparams = *(struct param *)params;
-  double (*p_or_d)(double, struct param, int); // EOS pointer
-  p_or_d = &eos_p_or_d;
+  double (*pres) (double, struct param *); // EOS pressure pointer
+  double (*rho) (double, struct param *); // EOS density pointer
+  pres = &eos_pres;
+  rho = &eos_rho;
 
   // for a single star we can print P and M as functions of r
   if (myparams.single_star == 0)
@@ -57,11 +65,11 @@ int func (double r, const double y[], double f[], void *params)
   } 
 
   // mass conservation equation
-  f[0] = 4.0*M_PI*pow(r, 2.0)*p_or_d(y[1], myparams, 0);
+  f[0] = 4.0*M_PI*pow(r, 2.0)*rho(y[1], &myparams);
 
   // TOV equation
   f[1] = -(GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT / pow(r, 2.0))
-    * (p_or_d(y[1], myparams, 0)
+    * (rho(y[1], &myparams)
     + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
     + (y[0] + 4 * M_PI * pow(r, 3.0)
     * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
@@ -86,13 +94,15 @@ int main (void)
   int i, status;
   struct param params;
   double r, r1, y[2];
-  const double tiny = 1.0e-5, pmin = tiny, pmax = 0.2;
+  const double rho_min = 1.0e+13, rho_max = 1.0e+17;
   const int MAX = 1000;
   // pressure/density arrays from tabulated EOS data
-  double *eos_pres = NULL, *eos_dens = NULL;
-  double *tmp1 = NULL, *tmp2 = NULL;
   int n_eos_pts;
   FILE *fp;
+  double (*pres) (double, struct param *); // EOS pressure pointer
+  double tmp;
+
+  pres = &eos_pres;
 
   fp = fopen("bck.eos", "r");
 
@@ -104,39 +114,53 @@ int main (void)
   // read in # of EOS data points
   fscanf(fp, "%i", &n_eos_pts);
 
-  printf("# of EOS data points: %i\n", n_eos_pts);
-  eos_dens = (double *) malloc (n_eos_pts*sizeof(double));
-  eos_pres = (double *) malloc (n_eos_pts*sizeof(double));
-  tmp1 = (double *) malloc (n_eos_pts*sizeof(double));
-  tmp2 = (double *) malloc (n_eos_pts*sizeof(double));
-  for (i = 0; i < n_eos_pts; i++) {
-    fscanf(fp, "%e %e %e %e",
-	   &eos_dens[i], &eos_pres[i], &tmp1, &tmp2);
-  }
-  // read in density and pressure data
+   printf("# of EOS data points: %i\n", n_eos_pts);
+  eos_tab_dens = (double *) malloc (n_eos_pts*sizeof(double));
+  eos_tab_pres = (double *) malloc (n_eos_pts*sizeof(double));
 
+ // read in density and pressure data
+  for (i = 0; i < n_eos_pts; i++) {
+    fscanf(fp, "%le %le %*le %*le", &eos_tab_dens[i], &eos_tab_pres[i]);
+   }
   fclose(fp);
 
-  // set up interpolators for EOS
-  //  params.acc = gsl_interp_accel_alloc ();
-  //  params.spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
+  /*
+  for (i = 0; i < n_eos_pts; i++) {
+    printf ("eos_dens[%i] = %le\t", i, eos_dens[i]);
+    printf ("eos_pres[%i] = %le\n", i, eos_pres[i]);
+  }
+  */
 
+  // set up interpolation machinery for EOS
+  params.acc = gsl_interp_accel_alloc ();
+  params.spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
+  gsl_spline_init (params.spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
+
+  printf ("getting ready to interpolate...\n");
+  for (i = 0; i < MAX; i++) {
+    tmp = rho_min + (double)i*((rho_max-rho_min)/(double) MAX);
+    printf("rho = %le; pres = %le\n", tmp, pres(tmp, &params));
+  }
+
+  // SKIP THIS STUFF UNTIL EOS (FORWARDS AND BACKWARDS) WORKS!
+  /*
   printf ("%12s %12s %12s\n", "R", "M(r=R)", "P(r=0)");
 
-  r = 1.0e-5; // the integrator will go nuts if we start right at r=0
-  r1 = 3.0; // some final 'radius' (much larger than actual radius)
+  r = 1.0e+2; // the integrator will go nuts if we start right at r=0
+  r1 = 1.0e+15; // some final 'radius' (much larger than actual radius)
   params.single_star = 1;
   for (i = 0; i < MAX; i++)
   {
-    /* central mass always starts at 0 (or very close, for numerical
-       reasons) */
+    central mass always starts at 0-ish
     y[0] = 1.0e-6;
-    y[1] = pmin + (double)i*((pmax - pmin)/(double)MAX);
+    y[1] = pres(rho_min, params)
+      + (double)i*((pres(rho_max, params)
+      - pres(rho_min, params))/(double)MAX);
     params.pinit = y[1];
-    /* This function is useful if you want to plot, e.g., central
-     * pressure vs. total mass. You can also hang onto the run of
-     * pressure with radius, which can be interesting when compared to
-     * the Newtonian case. */
+    // This function is useful if you want to plot, e.g., central
+    // pressure vs. total mass. You can also hang onto the run of
+    // pressure with radius, which can be interesting when compared to
+    // the Newtonian case.
     status = make_grid(params, r, r1, y);
   }
 
@@ -149,17 +173,15 @@ int main (void)
   params.pinit = y[1];
   status = make_grid(params, r, r1, y);
 
-  //  gsl_spline_free (params.spline);
-  //  gsl_interp_accel_free (params.acc);
-  free (eos_pres);
-  free (eos_dens);
-  free (tmp1);
-  free (tmp2);
+  */
 
-  eos_dens = NULL;
-  eos_pres = NULL;
-  tmp1 = NULL;
-  tmp2 = NULL;  
+  gsl_spline_free (params.spline);
+  gsl_interp_accel_free (params.acc);
+  free (eos_tab_pres);
+  free (eos_tab_dens);
+
+  eos_tab_dens = NULL;
+  eos_tab_pres = NULL;
   return 0;
 }
 

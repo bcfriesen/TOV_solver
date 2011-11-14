@@ -6,8 +6,8 @@ CXX = g++
 CXXFLAGS = -g -O0
 LD = gcc
 LDFLAGS = -g -O0
-LIBS = -L/usr/local/lib -lgsl -lgslcblas -lm
-INCLUDE = -I/usr/local/include
+LIBS = -L/home/friesen/lib -lgsl -lgslcblas -lm
+INCLUDE = -I/home/friesen/include
 
 TARGET = TOV_solver
 
