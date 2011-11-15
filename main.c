@@ -9,17 +9,15 @@
 #include <gsl/gsl_spline.h>
 #include <gsl/gsl_roots.h>
 
+// bounds for root-finder to invert EOS
+const double rho_root_min = 1.1e+3, rho_root_max = 9.0e+16;
+
 // pointers to tabulated EOS data
 double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
 
 // interpolation machinery
 gsl_interp_accel *acc = NULL;
 gsl_spline *spline = NULL;
-
-// root-finding stuff for inverting EOS
-const gsl_root_fsolver_type *T;
-gsl_root_fsolver *s = NULL;
-gsl_function F;
 
 /* temporary storage of pressure when calling root-finder to invert
    the EOS */
@@ -29,7 +27,8 @@ struct param // parameter list to be passed to ODEs
 {
   // pinit: central pressure
   // Gamma: polytropic index
-  double Gamma, pinit;
+  // rho_init: central density
+  double Gamma, pinit, rho_init;
   // single_star: if 0 (true), print grid along r
   int single_star;
   /* temperature. not part of ODE system being integrated so we have
@@ -39,7 +38,7 @@ struct param // parameter list to be passed to ODEs
 
 
 int make_grid (struct param params, double r, double r1, double y[]);
-
+double root_func (double rho, void *params);
 
 // "forward" EOS. input: rho, T. output: P
 double eos_pres (double rho, void *params)
@@ -55,6 +54,17 @@ double eos_rho (double pres, void *params) {
   struct param *eos_rho_params = (struct param *) params;
   int status;
   double rho_low, rho_hi, root;
+  // root-finding stuff for inverting EOS
+  const gsl_root_fsolver_type *T;
+  gsl_root_fsolver *s = NULL;
+  gsl_function F;
+  // set up root-finding machinery for inverting EOS
+  F.function = &root_func;
+  F.params = params;
+  T = gsl_root_fsolver_brent;
+  s = gsl_root_fsolver_alloc (T);
+  status = gsl_root_fsolver_set (s, &F, rho_root_min, rho_root_max);
+
   tmp_pres = pres;
   do {
     status = gsl_root_fsolver_iterate (s);
@@ -63,6 +73,8 @@ double eos_rho (double pres, void *params) {
     rho_hi = gsl_root_fsolver_x_upper (s);
     status = gsl_root_test_interval (rho_low, rho_hi, 0, 0.001);
   } while (status == GSL_CONTINUE);
+
+  gsl_root_fsolver_free (s);
   return (root);
 }
 
@@ -70,8 +82,6 @@ double root_func (double rho, void *params) {
   struct param *root_func_params = (struct param *) params;
   double (*pres) (double, void *);
   pres = &eos_pres;
-  //  printf ("hi, I'm root_func. tmp_pres = %le; rho = %le\n",
-  //	  tmp_pres, rho);
   return (tmp_pres - pres(rho, root_func_params));
 }
 
@@ -84,36 +94,42 @@ int func (double r, const double y[], double f[], void *params)
   pres = &eos_pres;
   rho = &eos_rho;
 
-  // for a single star we can print P and M as functions of r
-  if (myparams->single_star == 0)
-  {
-    printf("%12f %12f %12f\n", r, y[0], y[1]);
-  }
-
-  if (y[1] < 0.0) // can't have negative pressure
-  {
-    printf("%12f %12f %12f\n", r, y[0], myparams->pinit);
+  if (y[1] < 1.0e-10*myparams->pinit) {
+    if (myparams->single_star == 0) {
+      printf ("surface reached!\n");
+      printf ("%12s %12s %12s\n", "R (km)", "M (M_sun)", "rho(0) (g/cm^3)");
+    }
+    printf("%12le %12le %12le\n", r/1.0e+5, y[0]/GSL_CONST_CGSM_SOLAR_MASS,
+	   myparams->rho_init);
     return GSL_EBADFUNC; // this flag tells GSL integrator to quit
   } 
+  // for a single star we can print M, P and rho as functions of r
+
+  if (myparams->single_star == 0)
+  {
+    printf("%12le %12le %12le %12le\n", r/1.0e+5,
+	   y[0]/GSL_CONST_CGSM_SOLAR_MASS, y[1], rho(y[1], myparams));
+  }
 
   // mass conservation equation
-  f[0] = 4.0*M_PI*pow(r, 2.0)*rho(y[1], myparams);
+  f[0] = 4.0 * M_PI * pow(r, 2.0) * rho(y[1], myparams);
 
   // TOV equation
   f[1] = -(GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT / pow(r, 2.0))
     * (rho(y[1], myparams)
-    + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
-    + (y[0] + 4 * M_PI * pow(r, 3.0)
-    * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
+       + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
+    * (y[0] + 4 * M_PI * pow(r, 3.0)
+       * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
     / (1.0 - (2.0 * GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT * y[0]
-    / (pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0) * r)));
+	      / (pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0) * r)));
 
   // ODEs tend to return NaNs at the same radius where P < 0
   if ((gsl_isnan(f[0]) || gsl_isnan(f[1]))) 
   {
     /* print values at the radius where ODEs diverge. this is almost
        always at the surface */
-    printf("%12f %12f %12f\n", r, y[0], myparams->pinit);
+    printf("%12f %12f %12f\n", r/1.0e+5, y[0]/GSL_CONST_CGSM_SOLAR_MASS,
+	   myparams->rho_init);
     return GSL_EBADFUNC;
   }
 
@@ -127,7 +143,8 @@ int main (void)
   struct param params;
   double r, r1, y[2];
   double pres_min = 1.0e+10, pres_max = 1.0e+39;
-  const double rho_min = 1.0e+1, rho_max = 5.0e+16;
+  // bounds for making grid of m(R) vs. rho(0)
+  const double rho_min = 1.0e+14, rho_max = 5.0e+16;
   const int MAX = 1000;
   // pressure/density arrays from tabulated EOS data
   int n_eos_pts;
@@ -147,7 +164,6 @@ int main (void)
   pres = &eos_pres;
   rho = &eos_rho;
 
-  printf ("reading in tabulated EOS data...\n");
   fp = fopen("bck.eos", "r");
 
   if (fp == NULL) {
@@ -158,7 +174,6 @@ int main (void)
   // read in # of EOS data points
   fscanf(fp, "%i", &n_eos_pts);
 
-  printf("# of EOS data points: %i\n", n_eos_pts);
   eos_tab_dens = (double *) malloc (n_eos_pts*sizeof(double));
   eos_tab_pres = (double *) malloc (n_eos_pts*sizeof(double));
 
@@ -167,34 +182,39 @@ int main (void)
     fscanf(fp, "%le %le %*le %*le", &eos_tab_dens[i], &eos_tab_pres[i]);
   }
   fclose(fp);
-  printf ("successfully read in tabulated EOS data!\n");
 
   // set up interpolation machinery for EOS
   acc = gsl_interp_accel_alloc ();
   spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
   gsl_spline_init (spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
 
-  // set up root-finding machinery for inverting EOS
-  F.function = &root_func;
-  F.params = &params;
-  T = gsl_root_fsolver_brent;
-  s = gsl_root_fsolver_alloc (T);
-  status = gsl_root_fsolver_set (s, &F, rho_min, rho_max);
+  // now make grid
+  r = 1.0e+1; // the integrator will go nuts if we start right at r=0
+  r1 = 1.0e+10; // some final 'radius' (much larger than actual radius)
 
-  // SKIP THIS STUFF UNTIL EOS (FORWARDS AND BACKWARDS) WORKS!
   /*
-  printf ("%12s %12s %12s\n", "R", "M(r=R)", "P(r=0)");
+  printf ("let's test the inverted EOS\n");
+  for (i = 0; i < MAX; i++) {
+    tmp = pres(rho_root_min, &params)
+	    + (double) i * ((pres(rho_root_max, &params)
+			     - pres(rho_root_min, &params))/(double) MAX);
+    printf ("pressure = %12le; density = %12le\n",
+	    tmp, rho(tmp, &params));
+  }
+  */
 
-  r = 1.0e+2; // the integrator will go nuts if we start right at r=0
-  r1 = 1.0e+15; // some final 'radius' (much larger than actual radius)
+  printf ("%12s %12s %12s\n", "R", "M(r=R)", "rho(r=0)");
+
   params.single_star = 1;
   for (i = 0; i < MAX; i++)
   {
-    central mass always starts at 0-ish
-    y[0] = 1.0e-6;
-    y[1] = pres(rho_min, params)
-      + (double)i*((pres(rho_max, params)
-      - pres(rho_min, params))/(double)MAX);
+    // rho(0) evenly spaced in log
+    params.rho_init = log10(rho_min) +
+      (double)i*((log10(rho_max)-log10(rho_min))/(double)MAX);
+    params.rho_init = pow(10.0, params.rho_init);
+
+    y[1] = pres(params.rho_init, &params);
+    y[0] = (4.0/3.0) * M_PI * pow(r, 3.0) * rho(y[1], &params);
     params.pinit = y[1];
     // This function is useful if you want to plot, e.g., central
     // pressure vs. total mass. You can also hang onto the run of
@@ -203,11 +223,12 @@ int main (void)
     status = make_grid(params, r, r1, y);
   }
 
+  /*
   printf("\nnow for a single star!\n");
-  printf("%12s %12s %12s\n", "r", "M(r)", "P(r)");
+  printf("%12s %12s %12s %12s\n", "r", "M(r)", "P(r)", "rho(r)");
   // print P and M vs r for Chandrasekhar-mass star
   y[0] = 1.0e-6;
-  y[1] = 0.03; // pinit (roughly) for maximum mass
+  y[1] = pres(1.0e+15, &params); // rho(0) (roughly) for maximum mass
   params.single_star = 0;
   params.pinit = y[1];
   status = make_grid(params, r, r1, y);
@@ -215,7 +236,6 @@ int main (void)
 
   gsl_spline_free (spline);
   gsl_interp_accel_free (acc);
-  gsl_root_fsolver_free (s);
 
   free (eos_tab_pres);
   free (eos_tab_dens);
@@ -240,7 +260,8 @@ int make_grid (struct param params, double r, double r1, double y[])
 		   
   gsl_odeiv2_system sys = {func, fake_jac, 2, &params};
   gsl_odeiv2_driver *d = gsl_odeiv2_driver_alloc_y_new
-                         (&sys, gsl_odeiv2_step_rk4, 1.0e-6, 1.0e-6, 0.0);
+                         (&sys, gsl_odeiv2_step_rk8pd,
+                         1.0e+0, 1.0e-8, 1.0e-8);
 
   status = gsl_odeiv2_driver_apply(d, &r, r1, y);
 
