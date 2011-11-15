@@ -9,19 +9,21 @@
 #include <gsl/gsl_spline.h>
 #include <gsl/gsl_roots.h>
 
+// pointers to tabulated EOS data
 double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
 
-// interpolation stuff
-gsl_interp_accel *acc;
-gsl_spline *spline;
+// interpolation machinery
+gsl_interp_accel *acc = NULL;
+gsl_spline *spline = NULL;
 
 // root-finding stuff for inverting EOS
 const gsl_root_fsolver_type *T;
-gsl_root_fsolver *s;
+gsl_root_fsolver *s = NULL;
 gsl_function F;
 
+/* temporary storage of pressure when calling root-finder to invert
+   the EOS */
 double tmp_pres;
-
 
 struct param // parameter list to be passed to ODEs
 {
@@ -39,16 +41,18 @@ struct param // parameter list to be passed to ODEs
 int make_grid (struct param params, double r, double r1, double y[]);
 
 
-// EOS. input: rho, T. output: P
-double eos_pres (double rho, struct param *params)
+// "forward" EOS. input: rho, T. output: P
+double eos_pres (double rho, void *params)
 {
+  struct param *eos_pres_params = (struct param *) params;
   return (gsl_spline_eval (spline, rho, acc));
-  //  return (pow(rho, 1.0/params.Gamma)); // polytrope
+  // return (pow(rho, 1.0/params.Gamma)); // polytrope
 }
 
 
 // "reverse" EOS. input: P, T. output: rho
-double eos_rho (double pres, struct param *params) {
+double eos_rho (double pres, void *params) {
+  struct param *eos_rho_params = (struct param *) params;
   int status;
   double rho_low, rho_hi, root;
   tmp_pres = pres;
@@ -63,16 +67,20 @@ double eos_rho (double pres, struct param *params) {
 }
 
 double root_func (double rho, void *params) {
-  struct param *myparams = (struct param *) params;
-  return (tmp_pres - eos_pres(rho, myparams));
+  struct param *root_func_params = (struct param *) params;
+  double (*pres) (double, void *);
+  pres = &eos_pres;
+  //  printf ("hi, I'm root_func. tmp_pres = %le; rho = %le\n",
+  //	  tmp_pres, rho);
+  return (tmp_pres - pres(rho, root_func_params));
 }
 
 // the system of ODEs to be integrated
 int func (double r, const double y[], double f[], void *params)
 {
   struct param *myparams = (struct param *) params;
-  double (*pres) (double, struct param *); // EOS pressure pointer
-  double (*rho) (double, struct param *); // EOS density pointer
+  double (*pres) (double, void *); // EOS pressure pointer
+  double (*rho) (double, void *); // EOS density pointer
   pres = &eos_pres;
   rho = &eos_rho;
 
@@ -118,24 +126,28 @@ int main (void)
   int i, status;
   struct param params;
   double r, r1, y[2];
-  const double pres_min = 1.0e+8, pres_max = 1.0e+45;
-  const double rho_min = 1.0e+13, rho_max = 1.0e+17;
+  double pres_min = 1.0e+10, pres_max = 1.0e+39;
+  const double rho_min = 1.0e+1, rho_max = 5.0e+16;
   const int MAX = 1000;
   // pressure/density arrays from tabulated EOS data
   int n_eos_pts;
   FILE *fp;
-  double (*pres) (double, struct param *); // EOS pressure pointer
+  double (*pres) (double, void *); // EOS pressure pointer
+  double (*rho) (double, void *); // EOS density pointer
   double tmp;
 
-  F.function = &root_func;
-  F.params = &params;
-
-  T = gsl_root_fsolver_brent;
-  s = gsl_root_fsolver_alloc (T);
-  status = gsl_root_fsolver_set (s, &F, pres_min, pres_max);
+  /* this is the "third arm" of the EOS inversion routine. GSL calls
+     the function whose root is being found several times during
+     initialization and if we leave the pressure here uninitialized,
+     it might be 0 or something crazy, which will be out of bounds of
+     the "forward" EOS, and since the forward EOS uses interpolation,
+     an out-of-bounds value of pressure will make it crash. */
+  tmp_pres = 1.0e+25;
 
   pres = &eos_pres;
+  rho = &eos_rho;
 
+  printf ("reading in tabulated EOS data...\n");
   fp = fopen("bck.eos", "r");
 
   if (fp == NULL) {
@@ -146,33 +158,28 @@ int main (void)
   // read in # of EOS data points
   fscanf(fp, "%i", &n_eos_pts);
 
-   printf("# of EOS data points: %i\n", n_eos_pts);
+  printf("# of EOS data points: %i\n", n_eos_pts);
   eos_tab_dens = (double *) malloc (n_eos_pts*sizeof(double));
   eos_tab_pres = (double *) malloc (n_eos_pts*sizeof(double));
 
- // read in density and pressure data
+  // read in density and pressure data
   for (i = 0; i < n_eos_pts; i++) {
     fscanf(fp, "%le %le %*le %*le", &eos_tab_dens[i], &eos_tab_pres[i]);
-   }
-  fclose(fp);
-
-  /*
-  for (i = 0; i < n_eos_pts; i++) {
-    printf ("eos_dens[%i] = %le\t", i, eos_dens[i]);
-    printf ("eos_pres[%i] = %le\n", i, eos_pres[i]);
   }
-  */
+  fclose(fp);
+  printf ("successfully read in tabulated EOS data!\n");
 
   // set up interpolation machinery for EOS
   acc = gsl_interp_accel_alloc ();
   spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
   gsl_spline_init (spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
 
-  printf ("getting ready to interpolate...\n");
-  for (i = 0; i < MAX; i++) {
-    tmp = rho_min + (double)i*((rho_max-rho_min)/(double) MAX);
-    printf("rho = %le; pres = %le\n", tmp, pres(tmp, &params));
-  }
+  // set up root-finding machinery for inverting EOS
+  F.function = &root_func;
+  F.params = &params;
+  T = gsl_root_fsolver_brent;
+  s = gsl_root_fsolver_alloc (T);
+  status = gsl_root_fsolver_set (s, &F, rho_min, rho_max);
 
   // SKIP THIS STUFF UNTIL EOS (FORWARDS AND BACKWARDS) WORKS!
   /*
@@ -204,14 +211,14 @@ int main (void)
   params.single_star = 0;
   params.pinit = y[1];
   status = make_grid(params, r, r1, y);
-
   */
 
   gsl_spline_free (spline);
   gsl_interp_accel_free (acc);
+  gsl_root_fsolver_free (s);
+
   free (eos_tab_pres);
   free (eos_tab_dens);
-  gsl_root_fsolver_free (s);
 
   eos_tab_dens = NULL;
   eos_tab_pres = NULL;
