@@ -45,14 +45,15 @@ addition a total luminosity parameter for the star. The way the
 program exists currently, it assumes T is wrapped up in the tabulated
 EOS data, but this restriction would not be difficult to lift.
 
-Among other things, this program can tell you how massive is a relativistic star
-in hydrostatic equilibrium. To find this, just pick some final radius for the
-integration and watch P(r) drop. The surface of the star R is at the radius
-where P(r = R) = 0. Of course the integrator has no idea that P(r) can't be
-negative, but the ODEs certainly do, and will result in lots of NaNs once the
-integrator reaches the surface. So pick a large enough 'final' radius such
-that P(r) at least reaches zero, and ignore everything past that point where
-it goes negative/NaN.
+Among other things, this program can tell you how massive is a
+relativistic star in hydrostatic equilibrium. To find this, just pick
+some final radius for the integration and watch P(r) drop. The surface
+of the star R is at the radius where P(r = R) = 0. Of course the
+integrator has no idea that P(r) can't be negative, but the ODEs
+certainly do, and will result in lots of NaNs once the integrator
+reaches the surface. So pick a large enough 'final' radius such that
+P(r) at least reaches zero, and ignore everything past that point
+where it goes negative/NaN.
 
 Remember also that you need to specify rho(r = 0) as an initial
 condition. By construction M(r = 0) = 0 so that part's done. If you
