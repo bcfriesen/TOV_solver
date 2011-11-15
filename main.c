@@ -7,8 +7,21 @@
 #include <gsl/gsl_const_cgsm.h>
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_spline.h>
+#include <gsl/gsl_roots.h>
 
 double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
+
+// interpolation stuff
+gsl_interp_accel *acc;
+gsl_spline *spline;
+
+// root-finding stuff for inverting EOS
+const gsl_root_fsolver_type *T;
+gsl_root_fsolver *s;
+gsl_function F;
+
+double tmp_pres;
+
 
 struct param // parameter list to be passed to ODEs
 {
@@ -17,8 +30,6 @@ struct param // parameter list to be passed to ODEs
   double Gamma, pinit;
   // single_star: if 0 (true), print grid along r
   int single_star;
-  gsl_interp_accel *acc;
-  gsl_spline *spline;
   /* temperature. not part of ODE system being integrated so we have
      to leave it in the tag-along struct */
   double temp;
@@ -29,47 +40,60 @@ int make_grid (struct param params, double r, double r1, double y[]);
 
 
 // EOS. input: rho, T. output: P
-double eos_pres(double rho, struct param *params)
+double eos_pres (double rho, struct param *params)
 {
-  return (gsl_spline_eval (params->spline, rho, params->acc));
+  return (gsl_spline_eval (spline, rho, acc));
   //  return (pow(rho, 1.0/params.Gamma)); // polytrope
 }
 
 
 // "reverse" EOS. input: P, T. output: rho
-double eos_rho(double pres, struct param *params) {
-  // fill in the blanks...
- return (0.0);
+double eos_rho (double pres, struct param *params) {
+  int status;
+  double rho_low, rho_hi, root;
+  tmp_pres = pres;
+  do {
+    status = gsl_root_fsolver_iterate (s);
+    root = gsl_root_fsolver_root (s);
+    rho_low = gsl_root_fsolver_x_lower (s);
+    rho_hi = gsl_root_fsolver_x_upper (s);
+    status = gsl_root_test_interval (rho_low, rho_hi, 0, 0.001);
+  } while (status == GSL_CONTINUE);
+  return (root);
 }
 
+double root_func (double rho, void *params) {
+  struct param *myparams = (struct param *) params;
+  return (tmp_pres - eos_pres(rho, myparams));
+}
 
 // the system of ODEs to be integrated
 int func (double r, const double y[], double f[], void *params)
 {
-  struct param myparams = *(struct param *)params;
+  struct param *myparams = (struct param *) params;
   double (*pres) (double, struct param *); // EOS pressure pointer
   double (*rho) (double, struct param *); // EOS density pointer
   pres = &eos_pres;
   rho = &eos_rho;
 
   // for a single star we can print P and M as functions of r
-  if (myparams.single_star == 0)
+  if (myparams->single_star == 0)
   {
     printf("%12f %12f %12f\n", r, y[0], y[1]);
   }
 
   if (y[1] < 0.0) // can't have negative pressure
   {
-    printf("%12f %12f %12f\n", r, y[0], myparams.pinit);
+    printf("%12f %12f %12f\n", r, y[0], myparams->pinit);
     return GSL_EBADFUNC; // this flag tells GSL integrator to quit
   } 
 
   // mass conservation equation
-  f[0] = 4.0*M_PI*pow(r, 2.0)*rho(y[1], &myparams);
+  f[0] = 4.0*M_PI*pow(r, 2.0)*rho(y[1], myparams);
 
   // TOV equation
   f[1] = -(GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT / pow(r, 2.0))
-    * (rho(y[1], &myparams)
+    * (rho(y[1], myparams)
     + (y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0)))
     + (y[0] + 4 * M_PI * pow(r, 3.0)
     * y[1] / pow(GSL_CONST_CGSM_SPEED_OF_LIGHT, 2.0))
@@ -81,7 +105,7 @@ int func (double r, const double y[], double f[], void *params)
   {
     /* print values at the radius where ODEs diverge. this is almost
        always at the surface */
-    printf("%12f %12f %12f\n", r, y[0], myparams.pinit);
+    printf("%12f %12f %12f\n", r, y[0], myparams->pinit);
     return GSL_EBADFUNC;
   }
 
@@ -94,6 +118,7 @@ int main (void)
   int i, status;
   struct param params;
   double r, r1, y[2];
+  const double pres_min = 1.0e+8, pres_max = 1.0e+45;
   const double rho_min = 1.0e+13, rho_max = 1.0e+17;
   const int MAX = 1000;
   // pressure/density arrays from tabulated EOS data
@@ -101,6 +126,13 @@ int main (void)
   FILE *fp;
   double (*pres) (double, struct param *); // EOS pressure pointer
   double tmp;
+
+  F.function = &root_func;
+  F.params = &params;
+
+  T = gsl_root_fsolver_brent;
+  s = gsl_root_fsolver_alloc (T);
+  status = gsl_root_fsolver_set (s, &F, pres_min, pres_max);
 
   pres = &eos_pres;
 
@@ -132,9 +164,9 @@ int main (void)
   */
 
   // set up interpolation machinery for EOS
-  params.acc = gsl_interp_accel_alloc ();
-  params.spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
-  gsl_spline_init (params.spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
+  acc = gsl_interp_accel_alloc ();
+  spline = gsl_spline_alloc (gsl_interp_cspline, n_eos_pts);
+  gsl_spline_init (spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
 
   printf ("getting ready to interpolate...\n");
   for (i = 0; i < MAX; i++) {
@@ -175,10 +207,11 @@ int main (void)
 
   */
 
-  gsl_spline_free (params.spline);
-  gsl_interp_accel_free (params.acc);
+  gsl_spline_free (spline);
+  gsl_interp_accel_free (acc);
   free (eos_tab_pres);
   free (eos_tab_dens);
+  gsl_root_fsolver_free (s);
 
   eos_tab_dens = NULL;
   eos_tab_pres = NULL;
