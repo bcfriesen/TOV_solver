@@ -1,11 +1,11 @@
 OBJS = main.o
 
 CC = gcc
-CCFLAGS = -g -O0 -Wall
+CCFLAGS = -O3
 CXX = g++
-CXXFLAGS = -g -O0
+CXXFLAGS = -O3
 LD = gcc
-LDFLAGS = -g -O0
+LDFLAGS = -O3
 LIBS = -L/home/friesen/lib -lgsl -lgslcblas -lm
 INCLUDE = -I/home/friesen/include
 

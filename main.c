@@ -10,7 +10,9 @@
 #include <gsl/gsl_roots.h>
 
 // bounds for root-finder to invert EOS
-const double rho_root_min = 1.1e+3, rho_root_max = 9.0e+16;
+const double rho_root_min = 1.01e+6, rho_root_max = 4.9e+15; // use for bck.eos
+// const double rho_root_min = 7.81, rho_root_max = 3.0e+16; // use for eosC
+// const double rho_root_min = 1.1e+6, rho_root_max = 9.5e+15; // use for timmes.eos
 
 // pointers to tabulated EOS data
 double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
@@ -142,9 +144,8 @@ int main (void)
   int i, status;
   struct param params;
   double r, r1, y[2];
-  double pres_min = 1.0e+10, pres_max = 1.0e+39;
   // bounds for making grid of m(R) vs. rho(0)
-  const double rho_min = 1.0e+14, rho_max = 5.0e+16;
+  const double rho_min = 1.0e+14, rho_max = 9.8e+15;
   const int MAX = 1000;
   // pressure/density arrays from tabulated EOS data
   int n_eos_pts;
@@ -165,6 +166,8 @@ int main (void)
   rho = &eos_rho;
 
   fp = fopen("bck.eos", "r");
+  //  fp = fopen("eosC", "r");
+  //  fp = fopen("timmes.eos", "r");
 
   if (fp == NULL) {
     fprintf(stderr, "Can't open file!\n");
