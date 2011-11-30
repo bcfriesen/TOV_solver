@@ -10,12 +10,11 @@
 #include <gsl/gsl_roots.h>
 
 // bounds for root-finder to invert EOS
-const double rho_root_min = 1.01e+6, rho_root_max = 4.9e+15; // use for bck.eos
+// const double rho_root_min = 1.01e+6, rho_root_max = 4.9e+15; // use for bck.eos
 // const double rho_root_min = 7.81, rho_root_max = 3.0e+16; // use for eosC
 // const double rho_root_min = 1.1e+6, rho_root_max = 9.5e+15; // use for timmes.eos
+const double rho_root_min = 1.1e+6, rho_root_max = 9.9e+14; // use for helmholtz.eos
 
-// pointers to tabulated EOS data
-double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
 
 // interpolation machinery
 gsl_interp_accel *acc = NULL;
@@ -96,7 +95,10 @@ int func (double r, const double y[], double f[], void *params)
   pres = &eos_pres;
   rho = &eos_rho;
 
-  if (y[1] < 1.0e-10*myparams->pinit) {
+// set a minimum pressure cutoff. if we don't, the ODE solver will wobble all
+// over the surface and crash, or if you make the error tolerance really strict
+// it'll integrate forever
+  if (y[1] < 1.0e-9 * myparams->pinit) {
     if (myparams->single_star == 0) {
       printf ("surface reached!\n");
       printf ("%12s %12s %12s\n", "R (km)", "M (M_sun)", "rho(0) (g/cm^3)");
@@ -145,14 +147,16 @@ int main (void)
   struct param params;
   double r, r1, y[2];
   // bounds for making grid of m(R) vs. rho(0)
-  const double rho_min = 1.0e+14, rho_max = 9.8e+15;
-  const int MAX = 1000;
+  const double rho_min = 1.0e+13, rho_max = 9.0e+14;
+  const int MAX = 100;
   // pressure/density arrays from tabulated EOS data
   int n_eos_pts;
-  FILE *fp;
+  FILE *fp = NULL;
   double (*pres) (double, void *); // EOS pressure pointer
   double (*rho) (double, void *); // EOS density pointer
   double tmp;
+  // pointers to tabulated EOS data
+  double *eos_tab_pres = NULL, *eos_tab_dens = NULL;
 
   /* this is the "third arm" of the EOS inversion routine. GSL calls
      the function whose root is being found several times during
@@ -165,9 +169,10 @@ int main (void)
   pres = &eos_pres;
   rho = &eos_rho;
 
-  fp = fopen("bck.eos", "r");
+  //  fp = fopen("bck.eos", "r");
   //  fp = fopen("eosC", "r");
   //  fp = fopen("timmes.eos", "r");
+  fp = fopen("helmholtz.eos", "r");
 
   if (fp == NULL) {
     fprintf(stderr, "Can't open file!\n");
@@ -177,12 +182,12 @@ int main (void)
   // read in # of EOS data points
   fscanf(fp, "%i", &n_eos_pts);
 
-  eos_tab_dens = (double *) malloc (n_eos_pts*sizeof(double));
-  eos_tab_pres = (double *) malloc (n_eos_pts*sizeof(double));
-
+  eos_tab_dens = (double *) malloc (n_eos_pts * sizeof(double));
+  eos_tab_pres = (double *) malloc (n_eos_pts * sizeof(double));
+  
   // read in density and pressure data
   for (i = 0; i < n_eos_pts; i++) {
-    fscanf(fp, "%le %le %*le %*le", &eos_tab_dens[i], &eos_tab_pres[i]);
+    fscanf(fp, "%le %le", &eos_tab_dens[i], &eos_tab_pres[i]);
   }
   fclose(fp);
 
@@ -192,19 +197,8 @@ int main (void)
   gsl_spline_init (spline, eos_tab_dens, eos_tab_pres, n_eos_pts);
 
   // now make grid
-  r = 1.0e+1; // the integrator will go nuts if we start right at r=0
+  r = 1.0; // the integrator will go nuts if we start right at r=0
   r1 = 1.0e+10; // some final 'radius' (much larger than actual radius)
-
-  /*
-  printf ("let's test the inverted EOS\n");
-  for (i = 0; i < MAX; i++) {
-    tmp = pres(rho_root_min, &params)
-	    + (double) i * ((pres(rho_root_max, &params)
-			     - pres(rho_root_min, &params))/(double) MAX);
-    printf ("pressure = %12le; density = %12le\n",
-	    tmp, rho(tmp, &params));
-  }
-  */
 
   printf ("%12s %12s %12s\n", "R", "M(r=R)", "rho(r=0)");
 
@@ -213,11 +207,12 @@ int main (void)
   {
     // rho(0) evenly spaced in log
     params.rho_init = log10(rho_min) +
-      (double)i*((log10(rho_max)-log10(rho_min))/(double)MAX);
+      (double)i * ( (log10(rho_max) - log10(rho_min)) / (double)MAX);
     params.rho_init = pow(10.0, params.rho_init);
 
     y[1] = pres(params.rho_init, &params);
     y[0] = (4.0/3.0) * M_PI * pow(r, 3.0) * rho(y[1], &params);
+
     params.pinit = y[1];
     // This function is useful if you want to plot, e.g., central
     // pressure vs. total mass. You can also hang onto the run of
@@ -226,16 +221,19 @@ int main (void)
     status = make_grid(params, r, r1, y);
   }
 
-  /*
+/*
+  params.single_star = 0;
   printf("\nnow for a single star!\n");
   printf("%12s %12s %12s %12s\n", "r", "M(r)", "P(r)", "rho(r)");
   // print P and M vs r for Chandrasekhar-mass star
-  y[0] = 1.0e-6;
-  y[1] = pres(1.0e+15, &params); // rho(0) (roughly) for maximum mass
-  params.single_star = 0;
+  params.rho_init = 1.0e+13;
+
+  y[1] = pres(params.rho_init, &params); // rho(0) (roughly) for maximum mass
+  y[0] = (4.0/3.0) * M_PI * pow(r, 3.0) * rho(y[1], &params);
+
   params.pinit = y[1];
   status = make_grid(params, r, r1, y);
-  */
+*/
 
   gsl_spline_free (spline);
   gsl_interp_accel_free (acc);
@@ -245,6 +243,9 @@ int main (void)
 
   eos_tab_dens = NULL;
   eos_tab_pres = NULL;
+  fp = NULL;
+  pres = NULL;
+  rho = NULL;
   return 0;
 }
 
