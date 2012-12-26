@@ -3,3 +3,5 @@
 *.eos
 *.o
 TOV_solver
+results
+build

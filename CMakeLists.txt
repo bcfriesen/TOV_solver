@@ -1,0 +1,8 @@
+CMAKE_MINIMUM_REQUIRED (VERSION 2.8)
+PROJECT (vef)
+ENABLE_LANGUAGE (C)
+
+set (CMAKE_BUILD_TYPE "Debug")
+set (CMAKE_VERBOSE_MAKEFILE false)
+
+add_subdirectory(src)
