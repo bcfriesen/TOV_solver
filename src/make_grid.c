@@ -1,6 +1,6 @@
 #include <gsl/gsl_odeiv2.h>
-#include "param.h"
 #include "func.h"
+#include "make_grid.h"
 
 int
 make_grid (struct param params, double r, double r1, double y[])

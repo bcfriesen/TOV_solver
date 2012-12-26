@@ -1,3 +1,6 @@
+#include <gsl/gsl_spline.h>
+#include "param.h"
+#include "root_func.h"
 #include "eos_pres.h"
 #include "global.h"
 

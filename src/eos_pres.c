@@ -1,3 +1,4 @@
+#include <gsl/gsl_spline.h>
 #include "eos_pres.h"
 #include "global.h"
 
